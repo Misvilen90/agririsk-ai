@@ -1,0 +1,16 @@
+﻿__pycache__/
+*.pyc
+.env
+.venv/
+venv/
+
+# Machine learning model artifacts
+*.joblib
+
+# SQLite databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Local backup files
+*.backup*
