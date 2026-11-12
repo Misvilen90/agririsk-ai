@@ -101,8 +101,8 @@ class AgronomicAdvisoryEngine:
             if (
                 crop == "Rose"
                 and stage in [
-                    "Pruning/Bud Initiation",
-                    "Flowering/Harvesting"
+                    "Bud_Initiation",
+                    "Active_Harvesting"
                 ]
             ):
                 action = (
@@ -113,7 +113,7 @@ class AgronomicAdvisoryEngine:
 
             elif (
                 crop == "Coconut"
-                and stage == "Flowering/Button Formation"
+                and stage == "Inflorescence_Button"
             ):
                 action = (
                     "Maintain adequate soil moisture through irrigation and "

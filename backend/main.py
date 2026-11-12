@@ -1,4 +1,4 @@
-
+import os
 from pathlib import Path
 
 import joblib
@@ -9,7 +9,13 @@ from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
-from schemas import FarmProfileInput, MultiRiskResponse
+from schemas import (
+    FarmProfileInput,
+    LocationAnalysisResponse,
+    LocationInput,
+    MultiRiskResponse,
+)
+from location_data import LocationDataError, fetch_location_inputs
 from advisory_engine import AgronomicAdvisoryEngine
 from shap_engine import SHAPExplainabilityEngine
 from database import SessionLocal, init_db, QueryLog
@@ -50,13 +56,14 @@ CLASS_LEVELS = {
 
 SUPPORTED_CROPS = {"Rose", "Coconut"}
 
+# Growth stages the preprocessor was trained on, grouped by crop.
+STAGES_BY_CROP = {
+    "Rose": ["Pruning_Vegetative", "Bud_Initiation", "Active_Harvesting"],
+    "Coconut": ["Vegetative_Young", "Inflorescence_Button", "Nut_Maturity"],
+}
+
 SUPPORTED_GROWTH_STAGES = {
-    "Active_Harvesting",
-    "Bud_Initiation",
-    "Inflorescence_Button",
-    "Nut_Maturity",
-    "Pruning_Vegetative",
-    "Vegetative_Young",
+    stage for stages in STAGES_BY_CROP.values() for stage in stages
 }
 
 
@@ -86,13 +93,23 @@ app = FastAPI(
         "ML ensemble and SHAP-supported advisory service "
         "for Rose and Coconut crops."
     ),
-    version="1.3.0"
+    version="1.4.0"
 )
+
+# Comma-separated list of allowed frontend origins (override in production).
+ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost:3000,http://127.0.0.1:3000",
+    ).split(",")
+    if origin.strip()
+]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -111,6 +128,7 @@ def health_check():
         "service": "ML Ensemble, SHAP, Advisory & SQLite API",
         "supported_crops": sorted(SUPPORTED_CROPS),
         "supported_growth_stages": sorted(SUPPORTED_GROWTH_STAGES),
+        "growth_stages_by_crop": STAGES_BY_CROP,
         "risk_types": list(MODEL_TO_API.values()),
         "database": "SQLite",
     }
@@ -125,6 +143,45 @@ def analyze_field(
     input_data: FarmProfileInput,
     db: Session = Depends(get_db),
 ):
+    return run_analysis(input_data, db)
+
+
+@app.post("/api/v1/analyze-location", response_model=LocationAnalysisResponse)
+def analyze_location(
+    location: LocationInput,
+    db: Session = Depends(get_db),
+):
+    """GPS mode: fetch weather (NASA POWER) and soil (SoilGrids) for the
+    coordinates, then run the same analysis as /analyze-field."""
+    try:
+        fetched = fetch_location_inputs(location.latitude, location.longitude)
+    except LocationDataError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    try:
+        farm = FarmProfileInput(
+            crop_type=location.crop_type,
+            growth_stage=location.growth_stage,
+            latitude=location.latitude,
+            longitude=location.longitude,
+            **fetched.model_inputs,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Fetched field data failed validation: {exc}",
+        ) from exc
+
+    base = run_analysis(farm, db)
+    return LocationAnalysisResponse(
+        **base.model_dump(),
+        inputs_used=fetched.model_inputs,
+        data_notes=fetched.notes,
+        weather_date=fetched.weather_date,
+    )
+
+
+def run_analysis(input_data: FarmProfileInput, db: Session) -> MultiRiskResponse:
     try:
         # 5.1 Validate model-supported inputs
         if input_data.crop_type not in SUPPORTED_CROPS:
@@ -139,6 +196,16 @@ def analyze_field(
                 detail=(
                     "Unsupported growth_stage. Use one of: "
                     + ", ".join(sorted(SUPPORTED_GROWTH_STAGES))
+                ),
+            )
+
+        if input_data.growth_stage not in STAGES_BY_CROP[input_data.crop_type]:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"growth_stage '{input_data.growth_stage}' is not valid "
+                    f"for {input_data.crop_type}. Use one of: "
+                    + ", ".join(STAGES_BY_CROP[input_data.crop_type])
                 ),
             )
 

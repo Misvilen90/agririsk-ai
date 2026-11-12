@@ -23,8 +23,8 @@ RISK_THRESHOLDS = {
             # Initial heuristic; requires field agronomic validation.
             "temp_max_c": 36.0,
             "critical_stages": [
-                "Pruning/Bud Initiation",
-                "Flowering/Harvesting"
+                "Bud_Initiation",
+                "Active_Harvesting"
             ]
         },
 
@@ -56,7 +56,7 @@ RISK_THRESHOLDS = {
         "Heat_Stress": {
             "temp_max_c": 39.0,
             "critical_stages": [
-                "Flowering/Button Formation"
+                "Inflorescence_Button"
             ]
         },
 

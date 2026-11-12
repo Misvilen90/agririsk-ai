@@ -1,5 +1,5 @@
-﻿from pydantic import BaseModel, Field
-from typing import List, Dict
+﻿from pydantic import BaseModel, Field, model_validator
+from typing import List, Dict, Optional
 
 
 class FarmProfileInput(BaseModel):
@@ -15,8 +15,8 @@ class FarmProfileInput(BaseModel):
         description="Crop stage; mapped to the model's training categories"
     )
 
-    latitude: float = Field(..., example=10.658)
-    longitude: float = Field(..., example=77.012)
+    latitude: float = Field(..., ge=-90, le=90, examples=[10.658])
+    longitude: float = Field(..., ge=-180, le=180, examples=[77.012])
 
     clay_content_pct: float = Field(38.0, ge=0, le=100)
     sand_content_pct: float = Field(25.0, ge=0, le=100)
@@ -58,6 +58,14 @@ class FarmProfileInput(BaseModel):
         description="Three-day mean relative humidity percentage"
     )
 
+    @model_validator(mode="after")
+    def check_physical_consistency(self):
+        if self.clay_content_pct + self.sand_content_pct > 100:
+            raise ValueError("clay_content_pct + sand_content_pct must not exceed 100.")
+        if self.temp_min_c > self.temp_max_c:
+            raise ValueError("temp_min_c must not be greater than temp_max_c.")
+        return self
+
 
 class DriverDetail(BaseModel):
     feature_name: str
@@ -86,3 +94,17 @@ class MultiRiskResponse(BaseModel):
     risk_levels: Dict[str, str]
     explanations: List[RiskExplanation]
     advisories: List[AdvisoryItem]
+
+
+class LocationInput(BaseModel):
+    """GPS mode: the backend fetches weather and soil for these coordinates."""
+    crop_type: str
+    growth_stage: str
+    latitude: float = Field(..., ge=-90, le=90)
+    longitude: float = Field(..., ge=-180, le=180)
+
+
+class LocationAnalysisResponse(MultiRiskResponse):
+    inputs_used: Dict[str, float]
+    data_notes: List[str] = []
+    weather_date: Optional[str] = None
